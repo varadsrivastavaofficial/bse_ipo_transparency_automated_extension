@@ -1,4 +1,4 @@
-# BSE IPO Checker Extension
+# BSE IPO Transparency Automated Checker Extension
 
 An automated browser extension that streamlines checking IPO allotment status on the BSE India website. It automatically handles fetching available IPOs, filling in PAN numbers, solving the visual captchas, and executing batch checks across multiple PANs.
 
