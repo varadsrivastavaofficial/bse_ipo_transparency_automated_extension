@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Captcha OCR Processor</title>
+    <!-- Local Tesseract.js for Offline OCR -->
+    <script src="tesseract/tesseract.min.js"></script>
+    <style>
+        :root {
+            --primary: #4361ee;
+            --background: #f8f9fa;
+            --card-bg: #ffffff;
+            --text: #2b2d42;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--background);
+            color: var(--text);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 600px;
+        }
+
+        h1 {
+            margin-top: 0;
+            font-size: 24px;
+            color: var(--text);
+            border-bottom: 2px solid #edf2f7;
+            padding-bottom: 15px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            color: #4a5568;
+        }
+
+        select, input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #3a53d0;
+        }
+
+        button:disabled {
+            background: #a0aec0;
+            cursor: not-allowed;
+        }
+
+        .preview-area {
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        canvas {
+            border: 1px dashed #cbd5e0;
+            border-radius: 4px;
+            max-width: 100%;
+            margin-top: 10px;
+            background: repeating-conic-gradient(#f0f0f0 0% 25%, transparent 0% 50%) 50% / 20px 20px;
+        }
+
+        .result-box {
+            margin-top: 25px;
+            padding: 20px;
+            background: #ebf8ff;
+            border: 1px solid #bee3f8;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .result-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: #3182ce;
+            margin-bottom: 10px;
+        }
+
+        #output-text {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 28px;
+            font-weight: bold;
+            color: #2c5282;
+            letter-spacing: 2px;
+        }
+
+        #status {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #718096;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Captcha Preprocessor & OCR</h1>
+        
+        <div class="form-group">
+            <label for="image-upload">1. Upload Captcha Image (PNG)</label>
+            <input type="file" id="image-upload" accept="image/png, image/jpeg">
+        </div>
+
+
+
+        <button id="process-btn" disabled>Process Image & Extract Text</button>
+
+        <div class="preview-area">
+            <label>Processed Image Preview</label>
+            <canvas id="canvas"></canvas>
+        </div>
+
+        <div class="result-box">
+            <div class="result-title">Extracted Text (Case Sensitive)</div>
+            <div id="output-text">-</div>
+        </div>
+        
+        <div id="status" style="text-align: center;">Waiting for image upload...</div>
+    </div>
+
+    <script src="captcha.js"></script>
+</body>
+</html>

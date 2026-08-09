@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "BSE IPO Checker",
+  "version": "1.0.0",
+  "description": "Automate BSE IPO checking.",
+  "permissions": ["storage", "activeTab", "scripting", "offscreen"],
+  "host_permissions": ["*://*.bseindia.com/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "background": {
+    "service_worker": "src/background.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.bseindia.com/investors/appli_check*"],
+      "js": ["src/content.tsx"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "index.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["captcha.html", "captcha.js", "captcha-interceptor.js", "tesseract/*"],
+      "matches": ["*://*.bseindia.com/*"]
+    }
+  ]
+}
