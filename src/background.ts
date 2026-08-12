@@ -61,12 +61,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // Forward the message to the offscreen document via chrome.runtime.sendMessage.
         // The offscreen document's listener picks up OCR_IMAGE_FOR_OFFSCREEN,
         // while the guard above prevents this background script from re-handling it.
-        const response = await chrome.runtime.sendMessage({
-          type: 'OCR_IMAGE_FOR_OFFSCREEN',
-          dataUrl: message.dataUrl
-        });
-        console.log('[BG] Got response from offscreen:', JSON.stringify(response));
-        sendResponse(response);
+        try {
+          const response = await chrome.runtime.sendMessage({
+            type: 'OCR_IMAGE_FOR_OFFSCREEN',
+            dataUrl: message.dataUrl
+          });
+          console.log('[BG] Got response from offscreen:', JSON.stringify(response));
+          sendResponse(response);
+        } catch (msgErr: any) {
+          console.warn('[BG] Offscreen communication error:', msgErr?.message || msgErr);
+          sendResponse({ success: false, error: msgErr?.message || 'Could not communicate with offscreen OCR' });
+        }
       } catch (err: any) {
         console.error('[BG] Error:', err);
         sendResponse({ success: false, error: err.message });

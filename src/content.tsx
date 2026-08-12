@@ -673,19 +673,27 @@ const processWorkflowStep = async () => {
               try {
                   console.log('[BSE-EXT] Trying background/offscreen OCR approach...');
                   ocrResult = await new Promise((resolve, reject) => {
+                      if (!chrome.runtime?.id) {
+                          return reject(new Error('Extension context invalidated. Reload page.'));
+                      }
                       const timeout = setTimeout(() => reject(new Error('Background OCR timeout')), 45000);
-                      chrome.runtime.sendMessage(
-                          { type: 'PROCESS_CAPTCHA', dataUrl },
-                          (response) => {
-                              clearTimeout(timeout);
-                              if (chrome.runtime.lastError) {
-                                  console.warn('[BSE-EXT] Background OCR error:', chrome.runtime.lastError.message);
-                                  reject(new Error(chrome.runtime.lastError.message || 'Runtime error'));
-                              } else {
-                                  resolve(response);
+                      try {
+                          chrome.runtime.sendMessage(
+                              { type: 'PROCESS_CAPTCHA', dataUrl },
+                              (response) => {
+                                  clearTimeout(timeout);
+                                  if (chrome.runtime.lastError) {
+                                      console.warn('[BSE-EXT] Background OCR error:', chrome.runtime.lastError.message);
+                                      reject(new Error(chrome.runtime.lastError.message || 'Runtime error'));
+                                  } else {
+                                      resolve(response);
+                                  }
                               }
-                          }
-                      );
+                          );
+                      } catch (err: any) {
+                          clearTimeout(timeout);
+                          reject(err);
+                      }
                   });
                   console.log('[BSE-EXT] Background OCR response:', JSON.stringify(ocrResult));
               } catch (bgErr: any) {

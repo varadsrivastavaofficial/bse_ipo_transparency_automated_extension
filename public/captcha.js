@@ -139,19 +139,8 @@ async function processCaptcha(dataUrl) {
                     const corePath = chrome.runtime.getURL('tesseract/tesseract-core.wasm.js');
                     const langPath = chrome.runtime.getURL('tesseract/');
 
-                    let workerPath;
-                    try {
-                        const resp = await fetch(workerScriptUrl);
-                        const workerText = await resp.text();
-                        const blob = new Blob([workerText], { type: 'application/javascript' });
-                        workerPath = URL.createObjectURL(blob);
-                    } catch (e) {
-                        console.warn('[CAPTCHA OCR] Blob worker failed, falling back to direct path', e);
-                        workerPath = workerScriptUrl;
-                    }
-
                     globalWorker = await Tesseract.createWorker('eng', 1, {
-                        workerPath,
+                        workerPath: workerScriptUrl,
                         corePath,
                         langPath,
                         logger: m => {
