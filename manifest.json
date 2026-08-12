@@ -2,9 +2,14 @@
   "manifest_version": 3,
   "name": "BSE IPO Checker",
   "version": "1.0.0",
-  "description": "Automate BSE IPO checking.",
+  "description": "Automate BSE, KFintech, and Link Intime/MUFG IPO checking.",
   "permissions": ["storage", "activeTab", "scripting", "offscreen"],
-  "host_permissions": ["*://*.bseindia.com/*"],
+  "host_permissions": [
+    "*://*.bseindia.com/*",
+    "*://*.kfintech.com/*",
+    "*://*.linkintime.co.in/*",
+    "*://*.mufg.com/*"
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
@@ -14,7 +19,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.bseindia.com/investors/appli_check*"],
+      "matches": [
+        "*://*.bseindia.com/investors/appli_check*",
+        "*://*.kfintech.com/*",
+        "*://*.linkintime.co.in/*",
+        "*://*.mufg.com/*"
+      ],
       "js": ["src/content.tsx"],
       "run_at": "document_start"
     }
@@ -25,7 +35,12 @@
   "web_accessible_resources": [
     {
       "resources": ["captcha.html", "captcha.js", "captcha-interceptor.js", "tesseract/*"],
-      "matches": ["*://*.bseindia.com/*"]
+      "matches": [
+        "*://*.bseindia.com/*",
+        "*://*.kfintech.com/*",
+        "*://*.linkintime.co.in/*",
+        "*://*.mufg.com/*"
+      ]
     }
   ]
 }
