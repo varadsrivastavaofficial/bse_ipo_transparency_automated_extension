@@ -39,18 +39,30 @@ async function setupOffscreenDocument(path: string) {
 
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // IMPORTANT: Ignore messages that we forward to the offscreen document.
+  // chrome.runtime.sendMessage broadcasts to ALL listeners in the extension,
+  // including this background script. Without this guard, the background
+  // script would consume its own forwarded message and never let the
+  // offscreen document respond.
+  if (message.type === 'OCR_IMAGE_FOR_OFFSCREEN') {
+    return false; // Not handled here — let the offscreen document handle it
+  }
+
   if (message.type === 'PROCESS_CAPTCHA') {
     console.log('[BG] Received PROCESS_CAPTCHA, dataUrl length:', message.dataUrl?.length);
     (async () => {
       try {
         await setupOffscreenDocument('captcha.html');
-        console.log('[BG] Offscreen document ready, waiting 500ms...');
-        // Wait 500ms to ensure the offscreen document has fully initialized its message listeners
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('[BG] Offscreen document ready, waiting 2s for Tesseract init...');
+        // Wait for the offscreen document to fully initialize Tesseract WASM
+        await new Promise(resolve => setTimeout(resolve, 2000));
         console.log('[BG] Forwarding OCR_IMAGE to offscreen document...');
-        // Forward the message to the offscreen document
+
+        // Forward the message to the offscreen document via chrome.runtime.sendMessage.
+        // The offscreen document's listener picks up OCR_IMAGE_FOR_OFFSCREEN,
+        // while the guard above prevents this background script from re-handling it.
         const response = await chrome.runtime.sendMessage({
-          type: 'OCR_IMAGE',
+          type: 'OCR_IMAGE_FOR_OFFSCREEN',
           dataUrl: message.dataUrl
         });
         console.log('[BG] Got response from offscreen:', JSON.stringify(response));

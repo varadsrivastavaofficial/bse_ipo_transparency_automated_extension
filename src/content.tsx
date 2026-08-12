@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { SidebarApp } from './sidebar';
-import './index.css';
+import extensionStyles from './index.css?inline';
 import { db } from './utils';
 
 // EARLY INJECTION: Inject captcha-interceptor.js into the PAGE context immediately
@@ -37,9 +37,249 @@ const getSubmitButton = (): HTMLElement | null => {
     }) || null;
 };
 
+const processKFintechWorkflow = async (state: any) => {
+  const currentIpo = state.targetIpos[state.ipoIndex];
+  if (!currentIpo) {
+    await db.setWorkflowState({ isRunning: false, status: 'Completed all IPOs!' });
+    return;
+  }
+
+  const pans = await db.getPans();
+  const currentPan = pans[state.panIndex];
+  if (!currentPan) return;
+
+  if (state.isAwaitingResult) {
+    const notFoundDialog = document.querySelector('.MuiDialog-root');
+    const successTable = document.querySelector('.MuiTable-root');
+
+    if (notFoundDialog && notFoundDialog.textContent?.toLowerCase().includes('not found')) {
+      await db.addHistoryEntry({ id: crypto.randomUUID(), ipoName: currentIpo.name, investorName: currentPan.name, panMasked: currentPan.pan.substring(0,2) + '******' + currentPan.pan.substring(8), applicationNumber: "", registrarName: "KFintech", allotmentStatus: "Not Applied", sharesAllotted: "0", issuePrice: "0", verificationTimestamp: Date.now() });
+      await db.setWorkflowState({ isAwaitingResult: false });
+      
+      // Dismiss dialog
+      const okBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent?.includes('OK'));
+      if (okBtn) okBtn.click();
+      
+      advanceQueue(state, pans.length);
+      return;
+    }
+
+    const pageText = document.body.innerText || document.body.textContent || '';
+    const hasResultCard = pageText.includes('Application Number') && pageText.includes('Allotted');
+
+    if (successTable || hasResultCard) {
+       let status = "Allotted";
+       let shares = "Check manually";
+       let appNo = "";
+       
+       const allotMatch = pageText.match(/Allotted[\s\n:]*([\d,]+)/i);
+       if (allotMatch) {
+           const allottedCount = parseFloat(allotMatch[1].replace(/,/g, ''));
+           shares = allottedCount.toString();
+           if (allottedCount === 0) {
+               status = "Not Allotted";
+           }
+       }
+
+       const appMatch = pageText.match(/Application Number[\s\n:]*([A-Z0-9]+)/i);
+       if (appMatch) {
+           appNo = appMatch[1];
+       }
+
+       await db.addHistoryEntry({ id: crypto.randomUUID(), ipoName: currentIpo.name, investorName: currentPan.name, panMasked: currentPan.pan.substring(0,2) + '******' + currentPan.pan.substring(8), applicationNumber: appNo, registrarName: "KFintech", allotmentStatus: status, sharesAllotted: shares, issuePrice: "0", verificationTimestamp: Date.now() });
+       await db.setWorkflowState({ isAwaitingResult: false });
+       
+       // Optionally click back/reset if needed, but advancing queue will just reload/replace input on next tick if possible.
+       // However, KFintech often requires reloading or clicking 'Back' to check another PAN.
+       window.location.href = window.location.origin + window.location.pathname + '?r=' + Date.now();
+       advanceQueue(state, pans.length);
+       return;
+    }
+    
+    await db.setWorkflowState({ status: 'Awaiting KFintech result...' });
+    setTimeout(processWorkflowStep, 2000);
+    return;
+  }
+
+  await db.setWorkflowState({ status: `Checking ${currentIpo.name.substring(0, 15)}... (${currentPan.name})` });
+  
+  const combobox = document.querySelector<HTMLElement>('#demo-multiple-name');
+  if (combobox) {
+    const option = Array.from(document.querySelectorAll<HTMLElement>('li[role="option"]')).find(o => o.textContent?.trim() === currentIpo.name || o.getAttribute('data-value') === currentIpo.id);
+    if (option) {
+       // Material UI options often need mousedown/mouseup to register
+       option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+       option.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+       option.click();
+    } else {
+       // Material UI combobox needs mousedown to open reliably
+       combobox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+       combobox.click();
+       setTimeout(processWorkflowStep, 1000); // Wait for options to render and retry
+       return;
+    }
+  }
+
+  // Delay to allow React to update the page after IPO selection
+  setTimeout(() => {
+    const attemptFill = () => {
+      const panRadio = document.querySelector<HTMLInputElement>('input[type="radio"][value="PAN"]') || 
+                       Array.from(document.querySelectorAll<HTMLElement>('.MuiFormControlLabel-root')).find(l => l.textContent?.includes('PAN'));
+      if (panRadio) {
+        if (panRadio instanceof HTMLInputElement) {
+           if (!panRadio.checked) panRadio.click();
+        } else {
+           panRadio.click();
+        }
+      }
+
+      const panInput = document.querySelector<HTMLInputElement>('input#outlined-start-adornment');
+      if (panInput) {
+         panInput.focus();
+         panInput.value = currentPan.pan;
+         const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+         const prototype = Object.getPrototypeOf(panInput);
+         const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+         if (valueSetter && valueSetter !== prototypeValueSetter) prototypeValueSetter?.call(panInput, currentPan.pan);
+         else valueSetter?.call(panInput, currentPan.pan);
+         panInput.dispatchEvent(new Event('input', { bubbles: true }));
+         panInput.dispatchEvent(new Event('change', { bubbles: true }));
+         panInput.dispatchEvent(new Event('blur', { bubbles: true }));
+
+         const submitBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('button.content-button, button')).find(b => b.textContent?.toLowerCase().includes('submit'));
+         if (submitBtn) {
+            db.setWorkflowState({ isAwaitingResult: true, status: 'Waiting for result...' });
+            submitBtn.click();
+            setTimeout(processWorkflowStep, 2000);
+         }
+      } else {
+         // Retry if not yet rendered
+         setTimeout(attemptFill, 500);
+      }
+    };
+    attemptFill();
+  }, 1000);
+};
+
+const processMufgWorkflow = async (state: any) => {
+  const currentIpo = state.targetIpos[state.ipoIndex];
+  if (!currentIpo) {
+    await db.setWorkflowState({ isRunning: false, status: 'Completed all IPOs!' });
+    return;
+  }
+
+  const pans = await db.getPans();
+  const currentPan = pans[state.panIndex];
+  if (!currentPan) return;
+
+  if (state.isAwaitingResult) {
+    const errorLabel = document.querySelector<HTMLElement>('label#lblMessage');
+    const tables = document.querySelectorAll('table');
+    
+    if (errorLabel && errorLabel.textContent?.toLowerCase().includes('no record found')) {
+      await db.addHistoryEntry({ id: crypto.randomUUID(), ipoName: currentIpo.name, investorName: currentPan.name, panMasked: currentPan.pan.substring(0,2) + '******' + currentPan.pan.substring(8), applicationNumber: "", registrarName: "LinkIntime", allotmentStatus: "Not Applied", sharesAllotted: "0", issuePrice: "0", verificationTimestamp: Date.now() });
+      await db.setWorkflowState({ isAwaitingResult: false });
+      
+      const okBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.ui-dialog-buttonset button')).find(b => b.textContent?.includes('Ok'));
+      if (okBtn) okBtn.click();
+      
+      advanceQueue(state, pans.length);
+      return;
+    }
+
+    if (tables.length > 0) {
+       const text = Array.from(tables).map(t => (t as HTMLElement).innerText || t.textContent || '').join(' ').toLowerCase();
+       let status = "Allotted";
+       let shares = "Check manually";
+
+       // Parse the actual number for "Amount Adjusted" or "Securities Allotted"
+       const adjMatch = text.match(/amount\s*adj?usted[\s:=]*([\d\.,]+)/);
+       const allotMatch = text.match(/(?:securities|shares)\s*allotted[\s:=]*([\d\.,]+)/);
+       
+       let amountAdjusted = -1;
+       if (adjMatch) {
+           amountAdjusted = parseFloat(adjMatch[1].replace(/,/g, ''));
+       }
+
+       let sharesAllotted = -1;
+       if (allotMatch) {
+           sharesAllotted = parseFloat(allotMatch[1].replace(/,/g, ''));
+       }
+
+       // User specific logic: If Amount Adjusted != 0, then allotted
+       if (amountAdjusted === 0 || sharesAllotted === 0 || text.includes('adjusted0') || text.includes('adusted0') || text.includes('allotted0')) {
+           status = "Not Allotted";
+           shares = "0";
+       } else if (amountAdjusted > 0 || sharesAllotted > 0) {
+           status = "Allotted";
+           shares = sharesAllotted > 0 ? sharesAllotted.toString() : "Check manually";
+       }
+
+       await db.addHistoryEntry({ id: crypto.randomUUID(), ipoName: currentIpo.name, investorName: currentPan.name, panMasked: currentPan.pan.substring(0,2) + '******' + currentPan.pan.substring(8), applicationNumber: "", registrarName: "LinkIntime", allotmentStatus: status, sharesAllotted: shares, issuePrice: "0", verificationTimestamp: Date.now() });
+       await db.setWorkflowState({ isAwaitingResult: false });
+       advanceQueue(state, pans.length);
+       return;
+    }
+    
+    await db.setWorkflowState({ status: 'Awaiting MUFG result...' });
+    setTimeout(processWorkflowStep, 2000);
+    return;
+  }
+
+  await db.setWorkflowState({ status: `Checking ${currentIpo.name.substring(0, 15)}... (${currentPan.name})` });
+
+  const select = document.querySelector<HTMLSelectElement>('select#ddlCompany');
+  if (select) {
+     select.value = currentIpo.id;
+     select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // Delay to allow page to update after IPO selection
+  setTimeout(() => {
+    const attemptFill = () => {
+      const panRadio = document.querySelector<HTMLInputElement>('input[type="radio"][value="PAN"]');
+      if (panRadio && !panRadio.checked) panRadio.click();
+
+      const panInput = document.querySelector<HTMLInputElement>('input#txtStat');
+      if (panInput) {
+        // Fill PAN and submit
+        panInput.focus();
+        panInput.value = currentPan.pan;
+        const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        const prototype = Object.getPrototypeOf(panInput);
+        const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+        if (valueSetter && valueSetter !== prototypeValueSetter) prototypeValueSetter?.call(panInput, currentPan.pan);
+        else valueSetter?.call(panInput, currentPan.pan);
+        panInput.dispatchEvent(new Event('input', { bubbles: true }));
+        panInput.dispatchEvent(new Event('change', { bubbles: true }));
+        panInput.dispatchEvent(new Event('blur', { bubbles: true }));
+
+        const submitBtn = document.querySelector<HTMLElement>('input#btnsearc');
+        if (submitBtn) {
+          db.setWorkflowState({ isAwaitingResult: true, status: 'Waiting for result...' });
+          submitBtn.click();
+          setTimeout(processWorkflowStep, 2000);
+        }
+      } else {
+        // Retry after short delay if input not yet present
+        setTimeout(attemptFill, 500);
+      }
+    };
+    attemptFill();
+  }, 1000);
+};
+
 const processWorkflowStep = async () => {
   const state = await db.getWorkflowState();
   if (!state.isRunning || state.targetIpos.length === 0) return;
+
+  const hostname = window.location.hostname;
+  if (hostname.includes('kfintech')) {
+    return processKFintechWorkflow(state);
+  }
+  if (hostname.includes('mufg') || hostname.includes('linkintime')) {
+    return processMufgWorkflow(state);
+  }
 
   try {
     const currentIpo = state.targetIpos[state.ipoIndex];
@@ -193,14 +433,23 @@ const processWorkflowStep = async () => {
 
       const setNativeValue = (element: HTMLInputElement, value: string) => {
           element.focus();
+          // Clear existing value first
+          element.value = '';
           element.value = value;
+          // React-style value setter bypass
           const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
           const prototype = Object.getPrototypeOf(element);
           const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
           if (valueSetter && valueSetter !== prototypeValueSetter) prototypeValueSetter?.call(element, value);
           else valueSetter?.call(element, value);
+          // Also set via attribute for ASP.NET WebForms
+          element.setAttribute('value', value);
+          // Dispatch full event sequence: keyboard events needed by AngularJS/ASP.NET
           element.dispatchEvent(new Event('input', { bubbles: true }));
           element.dispatchEvent(new Event('change', { bubbles: true }));
+          element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: value.slice(-1) }));
+          element.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: value.slice(-1) }));
+          element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: value.slice(-1) }));
           element.dispatchEvent(new Event('blur', { bubbles: true }));
       };
 
@@ -243,11 +492,14 @@ const processWorkflowStep = async () => {
       }
 
       // Automatically focus the Captcha input to make it easy for the user
-      const captchaInput = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(i => 
+      // Helper to find the captcha input — called fresh each time to avoid stale references
+      const findCaptchaInput = () => Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]')).find(i => 
           (i.placeholder && i.placeholder.toLowerCase().includes('captcha')) || 
           i.id.toLowerCase().includes('captcha') || 
           i.name.toLowerCase().includes('captcha')
-      );      const handleSubmit = async () => {
+      );
+      const captchaInput = findCaptchaInput();
+      const handleSubmit = async () => {
           await db.setWorkflowState({ isAwaitingResult: true, status: 'Waiting 2 seconds for result...' });
           
           // Wait exactly 2 seconds before recording the results, as requested
@@ -323,8 +575,9 @@ const processWorkflowStep = async () => {
           console.log('[BSE-EXT] Canvas interception failed, falling back to OCR...');
           await db.setWorkflowState({ status: 'Extracting Captcha for OCR...' });
 
-          // Wait 2 seconds for the captcha canvas/image to fully render
-          setTimeout(async () => {
+          const MAX_OCR_RETRIES = 3;
+
+          const attemptOcr = async (retryCount: number) => {
               const captchaRect = captchaInput.getBoundingClientRect();
               
               // Find the captcha source: canvas or img
@@ -394,21 +647,25 @@ const processWorkflowStep = async () => {
                   return;
               }
               
-              console.log('[BSE-EXT] Captcha image captured, dataUrl length:', dataUrl.length);
+              console.log('[BSE-EXT] Captcha image captured (attempt', retryCount + 1, '), dataUrl length:', dataUrl.length);
               
-              // VISUAL DEBUG: Show the captured captcha on the page
-              const debugImg = document.createElement('img');
-              debugImg.src = dataUrl;
-              debugImg.style.border = '3px solid red';
-              debugImg.style.marginTop = '10px';
-              debugImg.style.width = '100px';
-              debugImg.style.height = '50px';
-              debugImg.style.display = 'block';
-              if (captchaInput.parentElement) {
-                  captchaInput.parentElement.appendChild(debugImg);
+              // VISUAL DEBUG: Show the captured captcha on the page (reuse or create)
+              let debugImg = captchaInput.parentElement?.querySelector<HTMLImageElement>('.bse-debug-captcha');
+              if (!debugImg) {
+                  debugImg = document.createElement('img');
+                  debugImg.className = 'bse-debug-captcha';
+                  debugImg.style.border = '3px solid red';
+                  debugImg.style.marginTop = '10px';
+                  debugImg.style.width = '100px';
+                  debugImg.style.height = '50px';
+                  debugImg.style.display = 'block';
+                  if (captchaInput.parentElement) {
+                      captchaInput.parentElement.appendChild(debugImg);
+                  }
               }
+              debugImg.src = dataUrl;
               
-              await db.setWorkflowState({ status: 'Running OCR...' });
+              await db.setWorkflowState({ status: `Running OCR... (attempt ${retryCount + 1}/${MAX_OCR_RETRIES})` });
               
               // STRATEGY 2: Use background service worker → offscreen document (most reliable for MV3)
               let ocrResult: any = null;
@@ -486,8 +743,23 @@ const processWorkflowStep = async () => {
               
               if (ocrResult && ocrResult.success && ocrResult.text) {
                   console.log('[BSE-EXT] OCR SUCCESS! Text:', ocrResult.text);
-                  captchaInput.disabled = false;
-                  setNativeValue(captchaInput, ocrResult.text);
+                  // Re-query the captcha input fresh from the DOM (it may have been replaced)
+                  const liveCaptchaInput = findCaptchaInput() || captchaInput;
+                  liveCaptchaInput.disabled = false;
+                  liveCaptchaInput.removeAttribute('disabled');
+                  liveCaptchaInput.readOnly = false;
+                  // Small delay to let the browser process the re-enable before setting value
+                  await new Promise(r => setTimeout(r, 100));
+                  setNativeValue(liveCaptchaInput, ocrResult.text);
+                  // Double-check the value was actually set
+                  if (!liveCaptchaInput.value || liveCaptchaInput.value !== ocrResult.text) {
+                      console.warn('[BSE-EXT] Value not set on first attempt, retrying...');
+                      liveCaptchaInput.value = ocrResult.text;
+                      liveCaptchaInput.setAttribute('value', ocrResult.text);
+                      liveCaptchaInput.dispatchEvent(new Event('input', { bubbles: true }));
+                      liveCaptchaInput.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  console.log('[BSE-EXT] Captcha input value after set:', liveCaptchaInput.value);
                   await db.setWorkflowState({ status: `Captcha: ${ocrResult.text}. Submitting...` });
                   
                   const btn = getSubmitButton();
@@ -498,14 +770,60 @@ const processWorkflowStep = async () => {
                          btn.click();
                      }
                   }
+              } else if (retryCount + 1 < MAX_OCR_RETRIES) {
+                  // AUTO-RETRY: Refresh the captcha and try again
+                  console.log(`[BSE-EXT] OCR attempt ${retryCount + 1} failed, refreshing captcha for retry...`);
+                  await db.setWorkflowState({ status: `OCR empty — refreshing captcha (retry ${retryCount + 2}/${MAX_OCR_RETRIES})...` });
+
+                  // Click the captcha refresh button (the ↻ icon near the captcha image)
+                  const refreshBtn = Array.from(document.querySelectorAll<HTMLElement>('a, button, img, span, i')).find(el => {
+                      const title = (el.getAttribute('title') || el.getAttribute('aria-label') || '').toLowerCase();
+                      const alt = (el.getAttribute('alt') || '').toLowerCase();
+                      const onclick = (el.getAttribute('onclick') || '').toLowerCase();
+                      const cls = (el.className || '').toLowerCase();
+                      // Look for refresh/reload icons near the captcha
+                      if (title.includes('refresh') || title.includes('reload') || title.includes('captcha') ||
+                          alt.includes('refresh') || alt.includes('reload') ||
+                          onclick.includes('captcha') || onclick.includes('refresh') || onclick.includes('generate') ||
+                          cls.includes('refresh') || cls.includes('reload')) {
+                          const r = el.getBoundingClientRect();
+                          return r.width > 0 && r.height > 0;
+                      }
+                      return false;
+                  });
+
+                  if (refreshBtn) {
+                      console.log('[BSE-EXT] Found captcha refresh button, clicking...');
+                      refreshBtn.click();
+                  } else {
+                      // Fallback: try clicking any clickable icon near the captcha image
+                      const captchaArea = captchaInput.closest('div, td, fieldset') || captchaInput.parentElement;
+                      if (captchaArea) {
+                          const nearbyClickables = Array.from(captchaArea.querySelectorAll<HTMLElement>('a, img[onclick], span[onclick], i')).filter(el => {
+                              const r = el.getBoundingClientRect();
+                              return r.width > 0 && r.width < 50 && r.height > 0 && r.height < 50;
+                          });
+                          if (nearbyClickables.length > 0) {
+                              console.log('[BSE-EXT] Clicking nearby icon as captcha refresh fallback');
+                              nearbyClickables[0].click();
+                          }
+                      }
+                  }
+
+                  // Wait for the new captcha to render, then retry
+                  setTimeout(() => attemptOcr(retryCount + 1), 3000);
               } else {
-                  console.log('[BSE-EXT] All OCR strategies failed. Response:', ocrResult);
-                  await db.setWorkflowState({ status: `OCR Failed: ${ocrResult?.error || 'Empty text'}. Manual input required.` });
+                  // All retries exhausted — fall back to manual input
+                  console.log('[BSE-EXT] All OCR attempts exhausted. Response:', ocrResult);
+                  await db.setWorkflowState({ status: `OCR Failed after ${MAX_OCR_RETRIES} attempts. Manual input required.` });
                   captchaInput.disabled = false;
                   captchaInput.placeholder = "Enter Captcha";
                   captchaInput.focus();
               }
-          }, 2000);
+          };
+
+          // Wait 2 seconds for the captcha canvas/image to fully render, then start first attempt
+          setTimeout(() => attemptOcr(0), 2000);
       }
     }, 500);
 
@@ -528,11 +846,44 @@ const advanceQueue = async (state: any, panCount: number) => {
 
 const injectSidebar = () => {
   if (document.getElementById('bse-ipo-sidebar-root')) return;
+  
   const appContainer = document.createElement('div');
   appContainer.id = 'bse-ipo-sidebar-root';
-  appContainer.style.cssText = 'position:fixed;top:0;right:0;width:400px;height:100vh;z-index:999999;background:white;box-shadow:-4px 0 15px rgba(0,0,0,0.1);overflow-y:auto;';
+  // Use a completely isolated container on the host
+  appContainer.style.cssText = `position:fixed;top:0;right:0;width:400px;height:100vh;z-index:2147483647;background:transparent;pointer-events:none;`;
   document.body.appendChild(appContainer);
-  createRoot(appContainer).render(<SidebarApp />);
+
+  const shadowRoot = appContainer.attachShadow({ mode: 'open' });
+
+  // Inject Tailwind CSS into Shadow DOM
+  const style = document.createElement('style');
+  style.textContent = extensionStyles;
+  shadowRoot.appendChild(style);
+
+  // Additional reset inside shadow root just in case
+  const resetStyle = document.createElement('style');
+  resetStyle.textContent = `
+    :host {
+      all: initial;
+    }
+    #shadow-react-root {
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      overflow-y: auto;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 16px;
+      color: white;
+      color-scheme: dark;
+    }
+  `;
+  shadowRoot.appendChild(resetStyle);
+
+  const reactRoot = document.createElement('div');
+  reactRoot.id = 'shadow-react-root';
+  shadowRoot.appendChild(reactRoot);
+
+  createRoot(reactRoot).render(<SidebarApp />);
   setTimeout(processWorkflowStep, 200); // Reduced delay to make it snappier
 };
 

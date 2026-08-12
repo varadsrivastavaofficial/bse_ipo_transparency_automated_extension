@@ -3,9 +3,10 @@
 An automated browser extension that streamlines checking IPO allotment status on the BSE India website. It automatically handles fetching available IPOs, filling in PAN numbers, solving the visual captchas, and executing batch checks across multiple PANs.
 
 ## Features
-- **Automated Captcha Solving** (via multi-layered extraction & OCR pipeline)
+- **Automated Captcha Solving** (via multi-layered extraction & OCR pipeline with Otsu's thresholding)
 - **Multi-PAN Management** (check multiple accounts automatically)
-- **Auto-Submissions & Error Handling** (including auto-scrolling to the execution status panel)
+- **Secure Local Storage** (PAN data is encrypted locally using AES-256)
+- **Auto-Submissions & Error Handling** (including auto-refreshing captchas and scrolling to the execution status panel)
 - **Sleek, Modern UI** with glassmorphism, special hover effects, and an interactive **WebGL Retro Dither background** that tracks mouse movements.
 - **InvestorGain Integration** for quick access to Live GMP data.
 
@@ -13,7 +14,7 @@ An automated browser extension that streamlines checking IPO allotment status on
 
 ## 🔍 Special Focus: Captcha Solving Automation
 
-The most complex and powerful feature of this extension is the automated captcha solver. BSE implements a rotating, canvas-rendered visual captcha with noise, making basic text extraction impossible. Our extension uses a robust **3-Tier Strategy** to guarantee success and bypass aggressive Content Security Policies (CSP).
+The most complex and powerful feature of this extension is the automated captcha solver. BSE implements a rotating, canvas-rendered visual captcha with noise, making basic text extraction impossible. Our extension uses a robust strategy to guarantee success and bypass aggressive Content Security Policies (CSP).
 
 ### 1. Canvas Context Interception (Tier 1 - Primary)
 Rather than trying to read the final image, we intercept the captcha at the moment it is drawn. 
@@ -27,12 +28,15 @@ If the interception misses the draw (e.g., due to race conditions or framework o
 - Because standard WebAssembly (WASM) is blocked by the target page's CSP, we capture the raw `dataUrl` of the captcha canvas.
 - This image is sent via `chrome.runtime.sendMessage` to our Background Service Worker.
 - The Service Worker spawns an **Offscreen Document** (`captcha.html`), which executes within the extension's own privileged environment, safely bypassing the website's CSP.
-- The image undergoes aggressive preprocessing (3x upscaling, brightness binarization) before being fed to Tesseract.js (configured in single-line alphanumeric mode).
-- **Blob-based Web Worker:** To prevent CSP `importScripts` blocking inside the Tesseract worker, we fetch the worker source dynamically as text and instantiate it via a Blob URL, preserving the extension's safe origin.
-- **Success Rate:** High accuracy on clean captures.
+- The image undergoes aggressive preprocessing: **4x upscaling, white padding, Otsu's adaptive thresholding for binarization, and morphological erosion** to remove isolated noise pixels before being fed to Tesseract.js.
+- **Global Worker Caching:** The Tesseract worker is instantiated once as a Blob URL globally within the offscreen document and reused across all subsequent captcha requests to prevent memory leaks and crashes.
+- **Success Rate:** High accuracy on heavily noised captchas.
 
-### 3. Iframe Injection OCR (Tier 3 - Last Resort)
-If the Service Worker pathway fails, the extension attempts to inject a hidden iframe directly into the page to run the OCR script locally, applying the same image upscaling and binarization filters.
+### 3. Automated Retry Loop
+If OCR yields empty or incorrect results, the extension automatically clicks the captcha refresh button and triggers a retry loop (up to 3 attempts) before falling back to manual input.
+
+### 4. Bypassing Framework Input Protection
+BSE uses strict ASP.NET/AngularJS event listeners that clear input fields set programmatically. The extension dispatches a full, realistic sequence of keyboard events (`keydown`, `keypress`, `input`, `keyup`, `change`) to trick the framework into accepting the injected captcha value.
 
 ---
 
@@ -40,6 +44,7 @@ If the Service Worker pathway fails, the extension attempts to inject a hidden i
 - **Framework:** React + Vite
 - **Styling:** Tailwind CSS (Custom Glassmorphism + Special FX + Arial Typography)
 - **Graphics:** Three.js + React Three Fiber + Postprocessing (for the WebGL Dither effect)
+- **Security:** CryptoJS (AES-256 for local storage encryption)
 - **Background Processes:** Chrome Manifest V3 (Service Workers, Offscreen Documents)
 - **OCR Engine:** Tesseract.js (Alphanumeric Whitelist, PSM 7, Blob Worker instantiation)
 
